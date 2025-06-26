@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from parser import parse_wb_card
+from parser import parse_card
 
 app = Flask(__name__)
 
