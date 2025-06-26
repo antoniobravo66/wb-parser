@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: wb-parser
-    env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt && playwright install
-    startCommand: python app.py
-    envVars: []
