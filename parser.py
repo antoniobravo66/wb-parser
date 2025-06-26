@@ -14,30 +14,34 @@ def parse_wb_card(url):
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             page.goto(url, timeout=60000)
+            page.wait_for_timeout(2000)  # Ждём 2 секунды после загрузки страницы
 
             # Название
             try:
-                result["title"] = page.locator("h1").first.inner_text()
+                if page.locator("h1").first.is_visible():
+                    result["title"] = page.locator("h1").first.inner_text()
             except:
                 result["title"] = ""
 
             # Цена
             try:
-                price = page.locator("ins[itemprop='price']").first.inner_text()
-                result["price"] = price.replace("₽", "").replace("\u2009", "").strip()
+                if page.locator("ins[itemprop='price']").first.is_visible():
+                    price = page.locator("ins[itemprop='price']").first.inner_text()
+                    result["price"] = price.replace("₽", "").replace("\u2009", "").strip()
             except:
                 result["price"] = ""
 
             # Рейтинг
             try:
-                rating_text = page.locator("span.product-review__rating").first.inner_text()
-                result["rating"] = rating_text.strip()
+                if page.locator("span.product-review__rating").first.is_visible():
+                    result["rating"] = page.locator("span.product-review__rating").first.inner_text().strip()
             except:
                 result["rating"] = ""
 
             # Описание
             try:
-                result["description"] = page.locator("div.collapsable__text").first.inner_text()
+                if page.locator("div.collapsable__text").first.is_visible():
+                    result["description"] = page.locator("div.collapsable__text").first.inner_text()
             except:
                 result["description"] = ""
 
