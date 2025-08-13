@@ -71,14 +71,18 @@ def fetch_product_data(product_id):
             
             if response.status_code == 200:
                 try:
-                    logger.info(f"✅ Получен ответ 200 от {url}, размер: {len(response.text)}")
-                    logger.info(f"Первые 300 символов ответа: {response.text[:300]}")
+                    # Requests автоматически распаковывает gzip, но проверим размер
+                    response_text = response.text
+                    logger.info(f"✅ Получен ответ 200 от {url}, размер: {len(response_text)}")
+                    logger.info(f"Первые 100 символов ответа: {response_text[:100]}")
+                    
                     data = response.json()
-                    logger.info(f"✅ Успешно получен JSON от {url}")
+                    logger.info(f"✅ Успешно получен и распарсен JSON от {url}")
                     return parse_product_data(data)
                 except json.JSONDecodeError as e:
                     logger.error(f"Ошибка парсинга JSON: {url} - {e}")
-                    logger.error(f"Полный ответ: {response.text}")
+                    logger.error(f"Тип содержимого: {response.headers.get('content-type', 'unknown')}")
+                    logger.error(f"Кодировка: {response.headers.get('content-encoding', 'none')}")
                     continue
             else:
                 logger.info(f"API {url} ответил: {response.status_code}")
