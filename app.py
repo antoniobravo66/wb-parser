@@ -16,388 +16,368 @@ CORS(app)  # Разрешаем CORS для Google Apps Script
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Список User-Agent для ротации
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0'
-]
-
-def get_random_headers():
-    """Возвращает случайные headers для имитации браузера"""
-    return {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'DNT': '1',
-        'Connection': 'keep-alive',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'Cache-Control': 'no-cache'
-    }
-
-def generate_wb_card_url(product_id):
-    """Генерирует URL для получения карточки товара WB"""
+def generate_basket_url(product_id):
+    """Генерирует URL для basket API на основе ID товара"""
     try:
-        # Конвертируем в строку и берем нужные части
+        # Преобразуем ID в строку для обработки
         id_str = str(product_id)
         
-        # vol - первые 3-4 цифры
-        if len(id_str) >= 4:
-            vol = id_str[:3]
-        else:
-            vol = id_str
-            
-        # part - первые 5-6 цифр
+        # vol{xxx} - первые 3-4 цифры
         if len(id_str) >= 6:
-            part = id_str[:5]
-        elif len(id_str) >= 5:
-            part = id_str[:4]
+            vol = id_str[:4]  # Берем первые 4 цифры
         else:
-            part = id_str
-        
-        # Пробуем разные basket серверы
-        basket_servers = ['01', '02', '03', '04', '05']
+            vol = id_str[:3]  # Или первые 3 цифры
+            
+        # part{xxxxx} - первые 5-6 цифр
+        if len(id_str) >= 6:
+            part = id_str[:6]
+        else:
+            part = id_str[:5] if len(id_str) >= 5 else id_str
+            
+        # Список серверов для попытки
+        servers = ['basket-01', 'basket-02', 'basket-03', 'basket-04', 'basket-05']
         
         urls = []
-        for server in basket_servers:
-            url = f"https://basket-{server}.wbbasket.ru/vol{vol}/part{part}/{product_id}/info/ru/card.json"
+        for server in servers:
+            url = f"https://{server}.wbbasket.ru/vol{vol}/part{part}/{product_id}/info/ru/card.json"
             urls.append(url)
             
         return urls
         
     except Exception as e:
-        logger.error(f"Ошибка генерации URL для {product_id}: {str(e)}")
+        logger.error(f"Ошибка генерации URL для {product_id}: {e}")
         return []
 
-def parse_wb_product(product_id):
-    """Парсит товар WB по ID"""
-    logger.info(f"Начинаем парсинг товара: {product_id}")
+def fetch_product_data(product_id):
+    """Получает данные товара через basket API"""
+    urls = generate_basket_url(product_id)
     
-    # Метод 1: Новый рабочий API
-    api_result = try_new_wb_api(product_id)
-    if api_result['success']:
-        logger.info(f"Товар {product_id} получен через новый API")
-        return api_result
-    
-    # Метод 2: HTML парсинг как fallback
-    html_result = try_html_parsing(product_id)
-    if html_result['success']:
-        logger.info(f"Товар {product_id} получен через HTML")
-        return html_result
-    
-    # Если все методы не сработали
-    logger.error(f"Не удалось получить данные товара {product_id}")
-    return {
-        'success': False,
-        'error': 'Не удалось получить данные товара',
-        'data': {
-            'category': 'Не определена',
-            'brand': 'Не определен',
-            'rating': '',
-            'price': '',
-            'name': f'Товар {product_id}',
-            'description': 'Не загружено',
-            'characteristics': ''
-        }
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://www.wildberries.ru/',
+        'Origin': 'https://www.wildberries.ru'
     }
-
-def try_new_wb_api(product_id):
-    """Пробует новый рабочий API WB"""
-    urls = generate_wb_card_url(product_id)
     
     for url in urls:
         try:
             logger.info(f"Пробуем новый API: {url}")
-            
-            headers = get_random_headers()
             response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 try:
                     data = response.json()
-                    
-                    # Проверяем что это валидная карточка товара
-                    if 'nm_id' in data and data.get('nm_id') == int(product_id):
-                        logger.info(f"✅ Товар найден через API: {data.get('imt_name', 'Без названия')}")
-                        
-                        result = extract_from_new_api(data)
-                        if result['name'] and result['name'] != f'Товар {product_id}':
-                            return {'success': True, 'data': result}
-                
-                except json.JSONDecodeError:
-                    logger.error(f"Ошибка парсинга JSON: {url}")
+                    logger.info(f"✅ Успешно получен JSON от {url}")
+                    return parse_product_data(data)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Ошибка парсинга JSON: {url} - {e}")
+                    logger.error(f"Ответ: {response.text[:200]}")
                     continue
             else:
                 logger.info(f"API {url} ответил: {response.status_code}")
-            
-            time.sleep(1)  # Пауза между попытками
-            
-        except Exception as e:
-            logger.error(f"Ошибка API {url}: {str(e)}")
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка запроса {url}: {e}")
             continue
     
-    return {'success': False}
+    return None
 
-def extract_from_new_api(data):
-    """Извлекает данные из нового API"""
+def parse_product_data(data):
+    """Парсит данные товара из JSON ответа basket API"""
     try:
-        # Основные поля
+        # Извлекаем основные поля
         name = data.get('imt_name', '')
+        category = data.get('subj_name', '')
         description = data.get('description', '')
         
-        # Категория и подкатегория
-        category = data.get('subj_name', '') or data.get('subj_root_name', '')
+        # Бренд из selling объекта
+        selling = data.get('selling', {})
+        brand = selling.get('brand_name', '')
         
-        # Бренд
-        brand = ''
-        if 'selling' in data and 'brand_name' in data['selling']:
-            brand = data['selling']['brand_name']
+        # Характеристики из options
+        characteristics = []
+        options = data.get('options', [])
+        for option in options:
+            name_char = option.get('name', '')
+            value_char = option.get('value', '')
+            if name_char and value_char:
+                characteristics.append(f"{name_char}: {value_char}")
         
-        # Характеристики
-        characteristics = ''
-        if 'options' in data:
-            chars = []
-            for option in data['options']:
-                name_char = option.get('name', '')
-                value_char = option.get('value', '')
-                
-                if name_char and value_char:
-                    chars.append(f"{name_char} / {value_char}")
-            
-            characteristics = '::'.join(chars)
+        characteristics_str = " | ".join(characteristics[:10])  # Берем первые 10 характеристик
         
-        # Цена нужно получить отдельно (этот API не содержит цены)
-        price = get_product_price(data.get('nm_id', ''))
-        
-        # Рейтинг (может быть в отдельном API)
-        rating = ''
-        
-        logger.info(f"Извлечены данные: {name[:50]}...")
+        logger.info(f"✅ Распарсены данные: название='{name}', бренд='{brand}', категория='{category}'")
         
         return {
-            'category': category,
-            'brand': brand,
-            'rating': rating,
-            'price': price,
             'name': name,
+            'brand': brand,
+            'category': category,
             'description': description,
-            'characteristics': characteristics
+            'characteristics': characteristics_str,
+            'price': '',  # Цена в этом API не передается
+            'rating': ''  # Рейтинг в этом API не передается
         }
         
     except Exception as e:
-        logger.error(f"Ошибка извлечения данных: {str(e)}")
-        return {
-            'category': '',
-            'brand': '',
-            'rating': '',
-            'price': '',
-            'name': '',
-            'description': '',
-            'characteristics': ''
-        }
+        logger.error(f"Ошибка парсинга данных товара: {e}")
+        return None
 
-def get_product_price(product_id):
-    """Получает цену товара из API цен"""
+def fetch_price_data(product_id):
+    """Получает цену товара через price API"""
     try:
-        # API для получения цены
-        price_url = f"https://card.wb.ru/cards/detail?appType=1&curr=rub&dest=-1257786&nm={product_id}"
+        price_url = f"https://product-order-qnt.wildberries.ru/by-nm/?nm={product_id}"
         
-        headers = get_random_headers()
-        response = requests.get(price_url, headers=headers, timeout=5)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Referer': 'https://www.wildberries.ru/'
+        }
+        
+        response = requests.get(price_url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
-            
-            if 'data' in data and 'products' in data['data'] and data['data']['products']:
-                product = data['data']['products'][0]
-                
-                if 'salePriceU' in product:
-                    return str(round(product['salePriceU'] / 100))
-                elif 'priceU' in product:
-                    return str(round(product['priceU'] / 100))
-        
+            if data and len(data) > 0:
+                # Ищем цену в ответе (может быть в разных полях)
+                price_info = data[0]
+                price = price_info.get('price', price_info.get('priceU', ''))
+                if price and price > 0:
+                    return str(price) if price < 10000 else str(price // 100)  # Конвертируем из копеек если нужно
+                    
     except Exception as e:
-        logger.error(f"Ошибка получения цены: {str(e)}")
-    
+        logger.error(f"Ошибка получения цены для {product_id}: {e}")
+        
     return ''
 
-def try_html_parsing(product_id):
-    """Парсит HTML страницу товара (fallback)"""
-    url = f"https://www.wildberries.ru/catalog/{product_id}/detail.aspx"
-    
+def fetch_html_fallback(product_id):
+    """Fallback метод - парсинг HTML страницы"""
     try:
+        url = f"https://www.wildberries.ru/catalog/{product_id}/detail.aspx"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://www.wildberries.ru/'
+        }
+        
         logger.info(f"Загружаем HTML: {url}")
-        
-        headers = get_random_headers()
-        headers.update({
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Upgrade-Insecure-Requests': '1'
-        })
-        
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             html = response.text
             
-            # Проверяем что это не страница ошибки
-            if 'unsuccessfulLoad' in html or len(html) < 5000:
-                logger.warning(f"Получена страница ошибки для {product_id}")
-                return {'success': False}
-            
+            # Простой парсинг HTML
             soup = BeautifulSoup(html, 'html.parser')
-            result = extract_from_html(soup, product_id)
             
-            if result['name'] and 'unsuccessfulLoad' not in result['name']:
-                return {'success': True, 'data': result}
-        
+            # Ищем название в title
+            title_tag = soup.find('title')
+            name = ''
+            if title_tag:
+                title_text = title_tag.get_text().strip()
+                # Убираем "купить в Wildberries" и подобное
+                name = re.sub(r'\s*купить.*$|.*wildberries.*$', '', title_text, flags=re.IGNORECASE).strip()
+            
+            # Ищем цену
+            price = ''
+            price_patterns = [
+                r'(\d+)\s*₽',
+                r'₽\s*(\d+)',
+                r'"price"[:\s]*(\d+)',
+                r'"priceU"[:\s]*(\d+)'
+            ]
+            
+            for pattern in price_patterns:
+                match = re.search(pattern, html)
+                if match:
+                    price_val = int(match.group(1))
+                    if price_val > 10000:  # Если цена в копейках
+                        price_val = price_val // 100
+                    if 1 <= price_val <= 100000:  # Разумные пределы цены
+                        price = str(price_val)
+                        break
+            
+            if name and len(name) > 5:  # Если нашли название
+                logger.info(f"✅ HTML парсинг успешен: {name}")
+                return {
+                    'name': name,
+                    'brand': '',
+                    'category': 'Не определена',
+                    'description': 'Загружено через HTML парсинг',
+                    'characteristics': '',
+                    'price': price,
+                    'rating': ''
+                }
+                
     except Exception as e:
-        logger.error(f"Ошибка HTML парсинга для {product_id}: {str(e)}")
-    
-    return {'success': False}
+        logger.error(f"Ошибка HTML парсинга: {e}")
+        
+    return None
 
-def extract_from_html(soup, product_id):
-    """Извлекает данные из HTML"""
-    try:
-        result = {
-            'category': '',
-            'brand': '',
-            'rating': '',
-            'price': '',
-            'name': '',
-            'description': '',
-            'characteristics': ''
-        }
-        
-        # Название из title
-        title_tag = soup.find('title')
-        if title_tag:
-            title = title_tag.get_text().strip()
-            title = re.sub(r'\s*купить.*$', '', title, flags=re.IGNORECASE)
-            title = re.sub(r'\s*-\s*wildberries.*$', '', title, flags=re.IGNORECASE)
-            if len(title) > 10:
-                result['name'] = title
-        
-        # H1 как альтернатива
-        if not result['name']:
-            h1_tag = soup.find('h1')
-            if h1_tag:
-                h1_text = h1_tag.get_text().strip()
-                if 'unsuccessfulLoad' not in h1_text and len(h1_text) > 5:
-                    result['name'] = h1_text
-        
-        # Описание из meta description
-        meta_desc = soup.find('meta', attrs={'name': 'description'})
-        if meta_desc:
-            description = meta_desc.get('content', '').strip()
-            if len(description) > 20:
-                result['description'] = description
-        
-        # Если название не найдено
-        if not result['name']:
-            result['name'] = f'Товар {product_id}'
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Ошибка извлечения из HTML: {str(e)}")
-        return {
-            'category': '',
-            'brand': '',
-            'rating': '',
-            'price': '',
-            'name': f'Товар {product_id}',
-            'description': '',
-            'characteristics': ''
-        }
-
-@app.route('/', methods=['GET'])
+@app.route('/')
 def home():
-    """Главная страница сервиса"""
     return jsonify({
-        'service': 'WB Parser',
+        'service': 'WB Parser Service',
         'version': '2.0',
         'status': 'active',
-        'api': 'Updated with working WB endpoints',
         'endpoints': {
-            'parse_product': '/parse/{product_id}',
-            'parse_multiple': '/parse',
-            'health': '/health'
+            '/health': 'Health check',
+            '/parse/<product_id>': 'Parse single product',
+            '/parse': 'Parse multiple products (POST)'
         }
     })
 
-@app.route('/health', methods=['GET'])
+@app.route('/health')
 def health():
-    """Проверка работоспособности"""
-    return jsonify({'status': 'healthy', 'timestamp': time.time()})
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': time.time()
+    })
 
-@app.route('/parse/<product_id>', methods=['GET'])
+@app.route('/parse/<product_id>')
 def parse_single_product(product_id):
     """Парсит один товар по ID"""
+    logger.info(f"Запрос на парсинг товара: {product_id}")
+    
     try:
-        logger.info(f"Запрос на парсинг товара: {product_id}")
+        logger.info(f"Начинаем парсинг товара: {product_id}")
         
-        # Добавляем случайную задержку
-        time.sleep(random.uniform(1, 3))
+        # Пробуем получить данные через basket API
+        product_data = fetch_product_data(product_id)
         
-        result = parse_wb_product(product_id)
+        if product_data:
+            # Пробуем получить цену отдельно
+            price = fetch_price_data(product_id)
+            if price:
+                product_data['price'] = price
+                
+            logger.info(f"✅ Товар {product_id} успешно распарсен через API")
+            return jsonify({
+                'success': True,
+                'product_id': product_id,
+                'data': product_data
+            })
         
-        return jsonify({
-            'success': result['success'],
-            'product_id': product_id,
-            'data': result['data'],
-            'error': result.get('error')
-        })
+        # Если API не сработал, пробуем HTML парсинг
+        logger.info(f"API не сработал, пробуем HTML парсинг для {product_id}")
+        html_data = fetch_html_fallback(product_id)
         
-    except Exception as e:
-        logger.error(f"Ошибка в parse_single_product: {str(e)}")
+        if html_data:
+            logger.info(f"✅ Товар {product_id} успешно распарсен через HTML")
+            return jsonify({
+                'success': True,
+                'product_id': product_id,
+                'data': html_data
+            })
+        
+        # Если ничего не сработало
+        logger.error(f"Не удалось получить данные товара {product_id}")
         return jsonify({
             'success': False,
             'product_id': product_id,
-            'error': str(e)
-        }), 500
+            'error': 'Не удалось получить данные товара',
+            'data': {
+                'name': f'Товар {product_id}',
+                'brand': 'Не определен',
+                'category': 'Не определена',
+                'description': 'Не загружено',
+                'characteristics': '',
+                'price': '',
+                'rating': ''
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Критическая ошибка при парсинге {product_id}: {e}")
+        return jsonify({
+            'success': False,
+            'product_id': product_id,
+            'error': str(e),
+            'data': {
+                'name': f'Товар {product_id}',
+                'brand': 'Ошибка сервиса',
+                'category': 'Ошибка сервиса',
+                'description': 'Ошибка обработки',
+                'characteristics': '',
+                'price': '',
+                'rating': ''
+            }
+        })
 
 @app.route('/parse', methods=['POST'])
 def parse_multiple_products():
-    """Парсит несколько товаров"""
+    """Парсит несколько товаров за раз (до 10)"""
     try:
         data = request.get_json()
         product_ids = data.get('product_ids', [])
         
         if not product_ids:
-            return jsonify({'error': 'product_ids required'}), 400
+            return jsonify({
+                'success': False,
+                'error': 'Не указаны ID товаров'
+            })
         
         if len(product_ids) > 10:
-            return jsonify({'error': 'Maximum 10 products per request'}), 400
-        
-        logger.info(f"Запрос на парсинг {len(product_ids)} товаров")
+            return jsonify({
+                'success': False,
+                'error': 'Максимум 10 товаров за раз'
+            })
         
         results = []
+        
         for product_id in product_ids:
-            # Задержка между товарами
-            time.sleep(random.uniform(2, 4))
+            logger.info(f"Групповой парсинг товара: {product_id}")
             
-            result = parse_wb_product(str(product_id))
-            results.append({
-                'product_id': str(product_id),
-                'success': result['success'],
-                'data': result['data'],
-                'error': result.get('error')
-            })
+            # Получаем данные
+            product_data = fetch_product_data(product_id)
+            
+            if product_data:
+                # Пробуем получить цену
+                price = fetch_price_data(product_id)
+                if price:
+                    product_data['price'] = price
+                    
+                results.append({
+                    'product_id': product_id,
+                    'success': True,
+                    'data': product_data
+                })
+            else:
+                # Fallback данные
+                results.append({
+                    'product_id': product_id,
+                    'success': False,
+                    'data': {
+                        'name': f'Товар {product_id}',
+                        'brand': 'Не определен',
+                        'category': 'Не определена', 
+                        'description': 'Не загружено',
+                        'characteristics': '',
+                        'price': '',
+                        'rating': ''
+                    }
+                })
+            
+            # Небольшая задержка между запросами
+            time.sleep(0.5)
+        
+        success_count = sum(1 for r in results if r['success'])
         
         return jsonify({
             'success': True,
-            'results': results,
-            'total': len(results)
+            'total': len(results),
+            'successful': success_count,
+            'failed': len(results) - success_count,
+            'results': results
         })
         
     except Exception as e:
-        logger.error(f"Ошибка в parse_multiple_products: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Ошибка группового парсинга: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
