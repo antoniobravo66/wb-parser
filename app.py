@@ -8,6 +8,7 @@ import re
 import json
 from bs4 import BeautifulSoup
 import logging
+import brotli  # Добавляем поддержку Brotli
 
 app = Flask(__name__)
 CORS(app)  # Разрешаем CORS для Google Apps Script
@@ -71,18 +72,41 @@ def fetch_product_data(product_id):
             
             if response.status_code == 200:
                 try:
-                    # Requests автоматически распаковывает gzip, но проверим размер
-                    response_text = response.text
-                    logger.info(f"✅ Получен ответ 200 от {url}, размер: {len(response_text)}")
-                    logger.info(f"Первые 100 символов ответа: {response_text[:100]}")
+                    # Проверяем кодировку и распаковываем если нужно
+                    content_encoding = response.headers.get('content-encoding', '').lower()
+                    logger.info(f"✅ Получен ответ 200 от {url}, размер: {len(response.content)}")
+                    logger.info(f"Кодировка: {content_encoding}")
                     
-                    data = response.json()
+                    # Обработка разных типов сжатия
+                    if content_encoding == 'br':
+                        # Brotli сжатие
+                        decompressed_data = brotli.decompress(response.content)
+                        response_text = decompressed_data.decode('utf-8')
+                        logger.info(f"✅ Распакован Brotli, новый размер: {len(response_text)}")
+                    elif content_encoding in ['gzip', 'deflate']:
+                        # Requests должен обработать автоматически
+                        response_text = response.text
+                        logger.info(f"✅ Обработано {content_encoding}")
+                    else:
+                        # Без сжатия
+                        response_text = response.text
+                        logger.info(f"✅ Без сжатия")
+                    
+                    logger.info(f"Первые 100 символов: {response_text[:100]}")
+                    
+                    data = json.loads(response_text)
                     logger.info(f"✅ Успешно получен и распарсен JSON от {url}")
                     return parse_product_data(data)
+                    
+                except brotli.error as e:
+                    logger.error(f"Ошибка распаковки Brotli: {url} - {e}")
+                    continue
                 except json.JSONDecodeError as e:
                     logger.error(f"Ошибка парсинга JSON: {url} - {e}")
                     logger.error(f"Тип содержимого: {response.headers.get('content-type', 'unknown')}")
-                    logger.error(f"Кодировка: {response.headers.get('content-encoding', 'none')}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Общая ошибка обработки: {url} - {e}")
                     continue
             else:
                 logger.info(f"API {url} ответил: {response.status_code}")
