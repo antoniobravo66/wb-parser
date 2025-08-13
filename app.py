@@ -23,8 +23,12 @@ def generate_basket_url(product_id):
         # Преобразуем ID в строку для обработки
         id_str = str(product_id)
         
-        # Список серверов для попытки
-        servers = ['basket-01', 'basket-02', 'basket-03', 'basket-04', 'basket-05']
+        # Список серверов для попытки - расширенный до basket-15
+        servers = [
+            'basket-01', 'basket-02', 'basket-03', 'basket-04', 'basket-05',
+            'basket-06', 'basket-07', 'basket-08', 'basket-09', 'basket-10',
+            'basket-11', 'basket-12', 'basket-13', 'basket-14', 'basket-15'
+        ]
         
         # Генерируем несколько вариантов vol/part для каждого сервера
         urls = []
