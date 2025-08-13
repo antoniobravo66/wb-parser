@@ -72,25 +72,34 @@ def fetch_product_data(product_id):
             
             if response.status_code == 200:
                 try:
-                    # Проверяем кодировку и распаковываем если нужно
+                    # Проверяем кодировку
                     content_encoding = response.headers.get('content-encoding', '').lower()
                     logger.info(f"✅ Получен ответ 200 от {url}, размер: {len(response.content)}")
                     logger.info(f"Кодировка: {content_encoding}")
                     
-                    # Обработка разных типов сжатия
+                    # Альтернативный подход - отключаем сжатие в headers
                     if content_encoding == 'br':
-                        # Brotli сжатие
-                        decompressed_data = brotli.decompress(response.content)
-                        response_text = decompressed_data.decode('utf-8')
-                        logger.info(f"✅ Распакован Brotli, новый размер: {len(response_text)}")
-                    elif content_encoding in ['gzip', 'deflate']:
-                        # Requests должен обработать автоматически
-                        response_text = response.text
-                        logger.info(f"✅ Обработано {content_encoding}")
+                        logger.info("Обнаружен Brotli, делаем новый запрос без сжатия")
+                        
+                        # Новый запрос без Accept-Encoding
+                        simple_headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Accept': 'application/json',
+                            'Referer': 'https://www.wildberries.ru/'
+                        }
+                        
+                        simple_response = requests.get(url, headers=simple_headers, timeout=10)
+                        
+                        if simple_response.status_code == 200:
+                            response_text = simple_response.text
+                            logger.info(f"✅ Получен несжатый ответ, размер: {len(response_text)}")
+                        else:
+                            logger.error(f"Несжатый запрос неудачен: {simple_response.status_code}")
+                            continue
                     else:
-                        # Без сжатия
+                        # Обычная обработка для gzip/deflate
                         response_text = response.text
-                        logger.info(f"✅ Без сжатия")
+                        logger.info(f"✅ Обработано как {content_encoding or 'несжатое'}")
                     
                     logger.info(f"Первые 100 символов: {response_text[:100]}")
                     
@@ -98,12 +107,8 @@ def fetch_product_data(product_id):
                     logger.info(f"✅ Успешно получен и распарсен JSON от {url}")
                     return parse_product_data(data)
                     
-                except brotli.error as e:
-                    logger.error(f"Ошибка распаковки Brotli: {url} - {e}")
-                    continue
                 except json.JSONDecodeError as e:
                     logger.error(f"Ошибка парсинга JSON: {url} - {e}")
-                    logger.error(f"Тип содержимого: {response.headers.get('content-type', 'unknown')}")
                     continue
                 except Exception as e:
                     logger.error(f"Общая ошибка обработки: {url} - {e}")
