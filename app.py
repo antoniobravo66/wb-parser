@@ -22,17 +22,20 @@ def generate_basket_url(product_id):
         # Преобразуем ID в строку для обработки
         id_str = str(product_id)
         
-        # vol{xxx} - первые 3-4 цифры
-        if len(id_str) >= 6:
-            vol = id_str[:4]  # Берем первые 4 цифры
+        # Правильный алгоритм для vol и part
+        # vol{xxx} - первые 3 цифры для коротких ID, первые 4 для длинных
+        if len(id_str) <= 3:
+            vol = id_str
+        elif len(id_str) <= 5:
+            vol = id_str[:3]  # Первые 3 цифры: 18671335 -> 186
         else:
-            vol = id_str[:3]  # Или первые 3 цифры
+            vol = id_str[:3]  # Для длинных ID тоже первые 3: 18671335 -> 186
             
-        # part{xxxxx} - первые 5-6 цифр
-        if len(id_str) >= 6:
-            part = id_str[:6]
+        # part{xxxxx} - первые 5 цифр
+        if len(id_str) <= 5:
+            part = id_str
         else:
-            part = id_str[:5] if len(id_str) >= 5 else id_str
+            part = id_str[:5]  # Первые 5 цифр: 18671335 -> 18671
             
         # Список серверов для попытки
         servers = ['basket-01', 'basket-02', 'basket-03', 'basket-04', 'basket-05']
