@@ -23,11 +23,10 @@ def generate_basket_url(product_id):
         # Преобразуем ID в строку для обработки
         id_str = str(product_id)
         
-        # Список серверов для попытки - расширенный до basket-15
+        # Список серверов для попытки - оптимизированный
         servers = [
             'basket-01', 'basket-02', 'basket-03', 'basket-04', 'basket-05',
-            'basket-06', 'basket-07', 'basket-08', 'basket-09', 'basket-10',
-            'basket-11', 'basket-12', 'basket-13', 'basket-14', 'basket-15'
+            'basket-11', 'basket-12'  # Добавили найденные рабочие серверы
         ]
         
         # Генерируем несколько вариантов vol/part для каждого сервера
@@ -210,10 +209,35 @@ def fetch_html_fallback(product_id):
         }
         
         logger.info(f"Загружаем HTML: {url}")
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 404:
+            logger.info(f"Товар {product_id} не найден на WB (404)")
+            return {
+                'name': f'Товар {product_id} не найден',
+                'brand': 'Товар удален',
+                'category': 'Недоступен',
+                'description': 'Товар больше не продается на Wildberries',
+                'characteristics': '',
+                'price': '',
+                'rating': ''
+            }
         
         if response.status_code == 200:
             html = response.text
+            
+            # Проверяем на ошибки WB
+            if 'unsuccessfulLoad' in html or 'Товар не найден' in html:
+                logger.info(f"Товар {product_id} недоступен (страница ошибки)")
+                return {
+                    'name': f'Товар {product_id} недоступен',
+                    'brand': 'Товар недоступен',
+                    'category': 'Недоступен',
+                    'description': 'Товар временно недоступен',
+                    'characteristics': '',
+                    'price': '',
+                    'rating': ''
+                }
             
             # Простой парсинг HTML
             soup = BeautifulSoup(html, 'html.parser')
@@ -224,7 +248,175 @@ def fetch_html_fallback(product_id):
             if title_tag:
                 title_text = title_tag.get_text().strip()
                 # Убираем "купить в Wildberries" и подобное
-                name = re.sub(r'\s*купить.*$|.*wildberries.*$', '', title_text, flags=re.IGNORECASE).strip()
+                name = re.sub(r'\s*купить.*$|.*wildberries.*
+
+@app.route('/')
+def home():
+    return jsonify({
+        'service': 'WB Parser Service',
+        'version': '2.0',
+        'status': 'active',
+        'endpoints': {
+            '/health': 'Health check',
+            '/parse/<product_id>': 'Parse single product',
+            '/parse': 'Parse multiple products (POST)'
+        }
+    })
+
+@app.route('/health')
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': time.time()
+    })
+
+@app.route('/parse/<product_id>')
+def parse_single_product(product_id):
+    """Парсит один товар по ID"""
+    logger.info(f"Запрос на парсинг товара: {product_id}")
+    
+    try:
+        logger.info(f"Начинаем парсинг товара: {product_id}")
+        
+        # Пробуем получить данные через basket API
+        product_data = fetch_product_data(product_id)
+        
+        if product_data:
+            # Пробуем получить цену отдельно
+            price = fetch_price_data(product_id)
+            if price:
+                product_data['price'] = price
+                
+            logger.info(f"✅ Товар {product_id} успешно распарсен через API")
+            return jsonify({
+                'success': True,
+                'product_id': product_id,
+                'data': product_data
+            })
+        
+        # Если API не сработал, пробуем HTML парсинг
+        logger.info(f"API не сработал, пробуем HTML парсинг для {product_id}")
+        html_data = fetch_html_fallback(product_id)
+        
+        if html_data:
+            logger.info(f"✅ Товар {product_id} успешно распарсен через HTML")
+            return jsonify({
+                'success': True,
+                'product_id': product_id,
+                'data': html_data
+            })
+        
+        # Если ничего не сработало
+        logger.error(f"Не удалось получить данные товара {product_id}")
+        return jsonify({
+            'success': False,
+            'product_id': product_id,
+            'error': 'Не удалось получить данные товара',
+            'data': {
+                'name': f'Товар {product_id}',
+                'brand': 'Не определен',
+                'category': 'Не определена',
+                'description': 'Не загружено',
+                'characteristics': '',
+                'price': '',
+                'rating': ''
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Критическая ошибка при парсинге {product_id}: {e}")
+        return jsonify({
+            'success': False,
+            'product_id': product_id,
+            'error': str(e),
+            'data': {
+                'name': f'Товар {product_id}',
+                'brand': 'Ошибка сервиса',
+                'category': 'Ошибка сервиса',
+                'description': 'Ошибка обработки',
+                'characteristics': '',
+                'price': '',
+                'rating': ''
+            }
+        })
+
+@app.route('/parse', methods=['POST'])
+def parse_multiple_products():
+    """Парсит несколько товаров за раз (до 10)"""
+    try:
+        data = request.get_json()
+        product_ids = data.get('product_ids', [])
+        
+        if not product_ids:
+            return jsonify({
+                'success': False,
+                'error': 'Не указаны ID товаров'
+            })
+        
+        if len(product_ids) > 10:
+            return jsonify({
+                'success': False,
+                'error': 'Максимум 10 товаров за раз'
+            })
+        
+        results = []
+        
+        for product_id in product_ids:
+            logger.info(f"Групповой парсинг товара: {product_id}")
+            
+            # Получаем данные
+            product_data = fetch_product_data(product_id)
+            
+            if product_data:
+                # Пробуем получить цену
+                price = fetch_price_data(product_id)
+                if price:
+                    product_data['price'] = price
+                    
+                results.append({
+                    'product_id': product_id,
+                    'success': True,
+                    'data': product_data
+                })
+            else:
+                # Fallback данные
+                results.append({
+                    'product_id': product_id,
+                    'success': False,
+                    'data': {
+                        'name': f'Товар {product_id}',
+                        'brand': 'Не определен',
+                        'category': 'Не определена', 
+                        'description': 'Не загружено',
+                        'characteristics': '',
+                        'price': '',
+                        'rating': ''
+                    }
+                })
+            
+            # Небольшая задержка между запросами
+            time.sleep(0.5)
+        
+        success_count = sum(1 for r in results if r['success'])
+        
+        return jsonify({
+            'success': True,
+            'total': len(results),
+            'successful': success_count,
+            'failed': len(results) - success_count,
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Ошибка группового парсинга: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False), '', title_text, flags=re.IGNORECASE).strip()
             
             # Ищем цену
             price = ''
@@ -250,7 +442,7 @@ def fetch_html_fallback(product_id):
                 return {
                     'name': name,
                     'brand': '',
-                    'category': 'Не определена',
+                    'category': 'Определена через HTML',
                     'description': 'Загружено через HTML парсинг',
                     'characteristics': '',
                     'price': price,
