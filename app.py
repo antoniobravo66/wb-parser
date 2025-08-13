@@ -248,7 +248,7 @@ def fetch_html_fallback(product_id):
             if title_tag:
                 title_text = title_tag.get_text().strip()
                 # Убираем "купить в Wildberries" и подобное
-                name = re.sub(r'\s*купить.*$|.*wildberries.*
+                name = re.sub(r'\s*купить.*$|.*wildberries.*$', '', title_text, flags=re.IGNORECASE).strip()
 
 @app.route('/')
 def home():
