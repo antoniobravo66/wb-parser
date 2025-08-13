@@ -18,34 +18,39 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def generate_basket_url(product_id):
-    """Генерирует URL для basket API на основе ID товара"""
+    """Генерирует URL для basket API на основе ID товара - улучшенная версия"""
     try:
         # Преобразуем ID в строку для обработки
         id_str = str(product_id)
         
-        # Правильный алгоритм для vol и part
-        # vol{xxx} - первые 3 цифры для коротких ID, первые 4 для длинных
-        if len(id_str) <= 3:
-            vol = id_str
-        elif len(id_str) <= 5:
-            vol = id_str[:3]  # Первые 3 цифры: 18671335 -> 186
-        else:
-            vol = id_str[:3]  # Для длинных ID тоже первые 3: 18671335 -> 186
-            
-        # part{xxxxx} - первые 5 цифр
-        if len(id_str) <= 5:
-            part = id_str
-        else:
-            part = id_str[:5]  # Первые 5 цифр: 18671335 -> 18671
-            
         # Список серверов для попытки
         servers = ['basket-01', 'basket-02', 'basket-03', 'basket-04', 'basket-05']
         
+        # Генерируем несколько вариантов vol/part для каждого сервера
         urls = []
+        
         for server in servers:
-            url = f"https://{server}.wbbasket.ru/vol{vol}/part{part}/{product_id}/info/ru/card.json"
-            urls.append(url)
+            # Вариант 1: стандартный (первые 3 и 5 цифр)
+            if len(id_str) >= 5:
+                vol1 = id_str[:3]  # 161172529 -> 161
+                part1 = id_str[:5]  # 161172529 -> 16117
+                url1 = f"https://{server}.wbbasket.ru/vol{vol1}/part{part1}/{product_id}/info/ru/card.json"
+                urls.append(url1)
             
+            # Вариант 2: для длинных ID (первые 4 и 6 цифр)
+            if len(id_str) >= 6:
+                vol2 = id_str[:4]  # 161172529 -> 1611
+                part2 = id_str[:6]  # 161172529 -> 161172
+                url2 = f"https://{server}.wbbasket.ru/vol{vol2}/part{part2}/{product_id}/info/ru/card.json"
+                urls.append(url2)
+            
+            # Вариант 3: альтернативная логика (первые 2 и 4 цифры)
+            if len(id_str) >= 4:
+                vol3 = id_str[:2]  # 161172529 -> 16
+                part3 = id_str[:4]  # 161172529 -> 1611
+                url3 = f"https://{server}.wbbasket.ru/vol{vol3}/part{part3}/{product_id}/info/ru/card.json"
+                urls.append(url3)
+        
         return urls
         
     except Exception as e:
