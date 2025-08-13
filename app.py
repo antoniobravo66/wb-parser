@@ -71,12 +71,14 @@ def fetch_product_data(product_id):
             
             if response.status_code == 200:
                 try:
+                    logger.info(f"✅ Получен ответ 200 от {url}, размер: {len(response.text)}")
+                    logger.info(f"Первые 300 символов ответа: {response.text[:300]}")
                     data = response.json()
                     logger.info(f"✅ Успешно получен JSON от {url}")
                     return parse_product_data(data)
                 except json.JSONDecodeError as e:
                     logger.error(f"Ошибка парсинга JSON: {url} - {e}")
-                    logger.error(f"Ответ: {response.text[:200]}")
+                    logger.error(f"Полный ответ: {response.text}")
                     continue
             else:
                 logger.info(f"API {url} ответил: {response.status_code}")
