@@ -29,39 +29,66 @@ def get_random_headers():
     """Возвращает случайные headers для имитации браузера"""
     return {
         'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
         'Accept-Encoding': 'gzip, deflate, br',
         'DNT': '1',
         'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0'
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Cache-Control': 'no-cache'
     }
+
+def generate_wb_card_url(product_id):
+    """Генерирует URL для получения карточки товара WB"""
+    try:
+        # Конвертируем в строку и берем нужные части
+        id_str = str(product_id)
+        
+        # vol - первые 3-4 цифры
+        if len(id_str) >= 4:
+            vol = id_str[:3]
+        else:
+            vol = id_str
+            
+        # part - первые 5-6 цифр
+        if len(id_str) >= 6:
+            part = id_str[:5]
+        elif len(id_str) >= 5:
+            part = id_str[:4]
+        else:
+            part = id_str
+        
+        # Пробуем разные basket серверы
+        basket_servers = ['01', '02', '03', '04', '05']
+        
+        urls = []
+        for server in basket_servers:
+            url = f"https://basket-{server}.wbbasket.ru/vol{vol}/part{part}/{product_id}/info/ru/card.json"
+            urls.append(url)
+            
+        return urls
+        
+    except Exception as e:
+        logger.error(f"Ошибка генерации URL для {product_id}: {str(e)}")
+        return []
 
 def parse_wb_product(product_id):
     """Парсит товар WB по ID"""
     logger.info(f"Начинаем парсинг товара: {product_id}")
     
-    # Метод 1: Попробуем API endpoints
-    api_result = try_api_endpoints(product_id)
+    # Метод 1: Новый рабочий API
+    api_result = try_new_wb_api(product_id)
     if api_result['success']:
-        logger.info(f"Товар {product_id} получен через API")
+        logger.info(f"Товар {product_id} получен через новый API")
         return api_result
     
-    # Метод 2: HTML парсинг
+    # Метод 2: HTML парсинг как fallback
     html_result = try_html_parsing(product_id)
     if html_result['success']:
         logger.info(f"Товар {product_id} получен через HTML")
         return html_result
-    
-    # Метод 3: Поисковый API
-    search_result = try_search_api(product_id)
-    if search_result['success']:
-        logger.info(f"Товар {product_id} получен через поиск")
-        return search_result
     
     # Если все методы не сработали
     logger.error(f"Не удалось получить данные товара {product_id}")
@@ -79,52 +106,139 @@ def parse_wb_product(product_id):
         }
     }
 
-def try_api_endpoints(product_id):
-    """Пробует различные API endpoints"""
-    endpoints = [
-        f"https://card.wb.ru/cards/detail?appType=1&curr=rub&dest=-1257786&nm={product_id}",
-        f"https://wbx-content-v2.wbstatic.net/cards/v1/detail?appType=1&curr=rub&dest=-1257786&nm={product_id}"
-    ]
+def try_new_wb_api(product_id):
+    """Пробует новый рабочий API WB"""
+    urls = generate_wb_card_url(product_id)
     
-    for endpoint in endpoints:
+    for url in urls:
         try:
-            logger.info(f"Пробуем API: {endpoint}")
+            logger.info(f"Пробуем новый API: {url}")
             
             headers = get_random_headers()
-            headers.update({
-                'Accept': 'application/json, text/plain, */*',
-                'Origin': 'https://www.wildberries.ru',
-                'Referer': 'https://www.wildberries.ru/'
-            })
-            
-            response = requests.get(endpoint, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
-                data = response.json()
-                
-                if data.get('data') and data['data'].get('products'):
-                    product = data['data']['products'][0]
+                try:
+                    data = response.json()
                     
-                    result = extract_from_api_response(product)
-                    if result['name'] and result['name'] != f'Товар {product_id}':
-                        return {'success': True, 'data': result}
+                    # Проверяем что это валидная карточка товара
+                    if 'nm_id' in data and data.get('nm_id') == int(product_id):
+                        logger.info(f"✅ Товар найден через API: {data.get('imt_name', 'Без названия')}")
+                        
+                        result = extract_from_new_api(data)
+                        if result['name'] and result['name'] != f'Товар {product_id}':
+                            return {'success': True, 'data': result}
+                
+                except json.JSONDecodeError:
+                    logger.error(f"Ошибка парсинга JSON: {url}")
+                    continue
+            else:
+                logger.info(f"API {url} ответил: {response.status_code}")
             
             time.sleep(1)  # Пауза между попытками
             
         except Exception as e:
-            logger.error(f"Ошибка API {endpoint}: {str(e)}")
+            logger.error(f"Ошибка API {url}: {str(e)}")
             continue
     
     return {'success': False}
 
+def extract_from_new_api(data):
+    """Извлекает данные из нового API"""
+    try:
+        # Основные поля
+        name = data.get('imt_name', '')
+        description = data.get('description', '')
+        
+        # Категория и подкатегория
+        category = data.get('subj_name', '') or data.get('subj_root_name', '')
+        
+        # Бренд
+        brand = ''
+        if 'selling' in data and 'brand_name' in data['selling']:
+            brand = data['selling']['brand_name']
+        
+        # Характеристики
+        characteristics = ''
+        if 'options' in data:
+            chars = []
+            for option in data['options']:
+                name_char = option.get('name', '')
+                value_char = option.get('value', '')
+                
+                if name_char and value_char:
+                    chars.append(f"{name_char} / {value_char}")
+            
+            characteristics = '::'.join(chars)
+        
+        # Цена нужно получить отдельно (этот API не содержит цены)
+        price = get_product_price(data.get('nm_id', ''))
+        
+        # Рейтинг (может быть в отдельном API)
+        rating = ''
+        
+        logger.info(f"Извлечены данные: {name[:50]}...")
+        
+        return {
+            'category': category,
+            'brand': brand,
+            'rating': rating,
+            'price': price,
+            'name': name,
+            'description': description,
+            'characteristics': characteristics
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка извлечения данных: {str(e)}")
+        return {
+            'category': '',
+            'brand': '',
+            'rating': '',
+            'price': '',
+            'name': '',
+            'description': '',
+            'characteristics': ''
+        }
+
+def get_product_price(product_id):
+    """Получает цену товара из API цен"""
+    try:
+        # API для получения цены
+        price_url = f"https://card.wb.ru/cards/detail?appType=1&curr=rub&dest=-1257786&nm={product_id}"
+        
+        headers = get_random_headers()
+        response = requests.get(price_url, headers=headers, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if 'data' in data and 'products' in data['data'] and data['data']['products']:
+                product = data['data']['products'][0]
+                
+                if 'salePriceU' in product:
+                    return str(round(product['salePriceU'] / 100))
+                elif 'priceU' in product:
+                    return str(round(product['priceU'] / 100))
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения цены: {str(e)}")
+    
+    return ''
+
 def try_html_parsing(product_id):
-    """Парсит HTML страницу товара"""
+    """Парсит HTML страницу товара (fallback)"""
     url = f"https://www.wildberries.ru/catalog/{product_id}/detail.aspx"
     
     try:
         logger.info(f"Загружаем HTML: {url}")
         
         headers = get_random_headers()
+        headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Upgrade-Insecure-Requests': '1'
+        })
+        
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
@@ -146,107 +260,6 @@ def try_html_parsing(product_id):
     
     return {'success': False}
 
-def try_search_api(product_id):
-    """Пробует найти товар через поисковый API"""
-    search_url = f"https://search.wb.ru/exactmatch/ru/common/v4/search?TestGroup=no_test&TestID=no_test&appType=1&curr=rub&dest=-1257786&query={product_id}&resultset=catalog&sort=popular&spp=24&suppressSpellcheck=false"
-    
-    try:
-        logger.info(f"Поиск через Search API: {product_id}")
-        
-        headers = get_random_headers()
-        headers.update({
-            'Accept': 'application/json',
-            'Origin': 'https://www.wildberries.ru',
-            'Referer': 'https://www.wildberries.ru/'
-        })
-        
-        response = requests.get(search_url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            if data.get('data') and data['data'].get('products'):
-                products = data['data']['products']
-                
-                # Ищем точное совпадение ID
-                for product in products:
-                    if str(product.get('id', '')) == str(product_id):
-                        result = extract_from_api_response(product)
-                        return {'success': True, 'data': result}
-                
-                # Если точное совпадение не найдено, берем первый
-                if products:
-                    result = extract_from_api_response(products[0])
-                    return {'success': True, 'data': result}
-        
-    except Exception as e:
-        logger.error(f"Ошибка Search API для {product_id}: {str(e)}")
-    
-    return {'success': False}
-
-def extract_from_api_response(product):
-    """Извлекает данные из API ответа"""
-    try:
-        # Базовые поля
-        category = product.get('subj_name') or product.get('subj_root_name') or ''
-        brand = product.get('brand') or ''
-        rating = product.get('rating') or product.get('reviewRating') or ''
-        name = product.get('name') or ''
-        description = product.get('description') or ''
-        
-        # Цена
-        price = ''
-        if product.get('salePriceU'):
-            price = str(round(product['salePriceU'] / 100))
-        elif product.get('priceU'):
-            price = str(round(product['priceU'] / 100))
-        
-        # Характеристики
-        characteristics = ''
-        if product.get('characteristics'):
-            chars = []
-            for char in product['characteristics']:
-                name_char = char.get('name', '')
-                value_char = ''
-                
-                if char.get('value'):
-                    if isinstance(char['value'], list):
-                        value_char = ';'.join(map(str, char['value']))
-                    else:
-                        value_char = str(char['value'])
-                elif char.get('values'):
-                    if isinstance(char['values'], list):
-                        value_char = ';'.join(map(str, char['values']))
-                    else:
-                        value_char = str(char['values'])
-                
-                if name_char and value_char:
-                    chars.append(f"{name_char} / {value_char}")
-            
-            characteristics = '::'.join(chars)
-        
-        return {
-            'category': category,
-            'brand': brand,
-            'rating': rating,
-            'price': price,
-            'name': name,
-            'description': description,
-            'characteristics': characteristics
-        }
-        
-    except Exception as e:
-        logger.error(f"Ошибка извлечения данных из API: {str(e)}")
-        return {
-            'category': '',
-            'brand': '',
-            'rating': '',
-            'price': '',
-            'name': '',
-            'description': '',
-            'characteristics': ''
-        }
-
 def extract_from_html(soup, product_id):
     """Извлекает данные из HTML"""
     try:
@@ -260,22 +273,22 @@ def extract_from_html(soup, product_id):
             'characteristics': ''
         }
         
-        # Название
+        # Название из title
         title_tag = soup.find('title')
         if title_tag:
             title = title_tag.get_text().strip()
-            # Очищаем от лишнего
             title = re.sub(r'\s*купить.*$', '', title, flags=re.IGNORECASE)
             title = re.sub(r'\s*-\s*wildberries.*$', '', title, flags=re.IGNORECASE)
             if len(title) > 10:
                 result['name'] = title
         
-        # H1
-        h1_tag = soup.find('h1')
-        if h1_tag and not result['name']:
-            h1_text = h1_tag.get_text().strip()
-            if 'unsuccessfulLoad' not in h1_text and len(h1_text) > 5:
-                result['name'] = h1_text
+        # H1 как альтернатива
+        if not result['name']:
+            h1_tag = soup.find('h1')
+            if h1_tag:
+                h1_text = h1_tag.get_text().strip()
+                if 'unsuccessfulLoad' not in h1_text and len(h1_text) > 5:
+                    result['name'] = h1_text
         
         # Описание из meta description
         meta_desc = soup.find('meta', attrs={'name': 'description'})
@@ -284,26 +297,7 @@ def extract_from_html(soup, product_id):
             if len(description) > 20:
                 result['description'] = description
         
-        # Цена (простой поиск)
-        price_patterns = [
-            r'(\d+)\s*₽',
-            r'₽\s*(\d+)',
-            r'"price":\s*(\d+)',
-            r'"salePriceU":\s*(\d+)'
-        ]
-        
-        html_text = str(soup)
-        for pattern in price_patterns:
-            match = re.search(pattern, html_text)
-            if match:
-                price = int(match.group(1))
-                if price > 10000:  # Если в копейках
-                    price = round(price / 100)
-                if price > 0 and price < 1000000:
-                    result['price'] = str(price)
-                    break
-        
-        # Если название не найдено, используем ID
+        # Если название не найдено
         if not result['name']:
             result['name'] = f'Товар {product_id}'
         
@@ -326,8 +320,9 @@ def home():
     """Главная страница сервиса"""
     return jsonify({
         'service': 'WB Parser',
-        'version': '1.0',
+        'version': '2.0',
         'status': 'active',
+        'api': 'Updated with working WB endpoints',
         'endpoints': {
             'parse_product': '/parse/{product_id}',
             'parse_multiple': '/parse',
@@ -383,7 +378,7 @@ def parse_multiple_products():
         
         results = []
         for product_id in product_ids:
-            # Добавляем задержку между товарами
+            # Задержка между товарами
             time.sleep(random.uniform(2, 4))
             
             result = parse_wb_product(str(product_id))
