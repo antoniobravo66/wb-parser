@@ -7,7 +7,7 @@ services:
     plan: free
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.10.0
     scaling:
       minInstances: 1
       maxInstances: 1
